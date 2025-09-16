@@ -7,31 +7,31 @@ NASMFLAGS= -felf64 -o
 all: nolibc_no_rwx_rodata nolibc_no_rwx_text nolibc no_pie pie envp
 
 nolibc_no_rwx_rodata.o: nolibc_no_rwx_rodata.asm
-	nasm $(NASMFLAGS) $@ $<
+	nasm $(NASMFLAGS) $@ $?
 
 nolibc_no_rwx_rodata: nolibc_no_rwx_rodata.o
-	ld -nostdlib -o $@ $<
+	ld -nostdlib -o $@ $?
 
 nolibc_no_rwx_text.o: nolibc_no_rwx_text.asm
-	nasm $(NASMFLAGS) $@ $<
+	nasm $(NASMFLAGS) $@ $?
 
 nolibc_no_rwx_text: nolibc_no_rwx_text.o
-	ld -nostdlib -o $@ $<
+	ld -nostdlib -o $@ $?
 
 nolibc.o: nolibc.asm
-	nasm $(NASMFLAGS) $@ $<
+	nasm $(NASMFLAGS) $@ $?
 
 nolibc: nolibc.o
-	ld -nostdlib -o $@ $<
+	ld -nostdlib -o $@ $?
 
-no_pie: hello.c
-	gcc $(CFLAGS_NO_PIE) $@ $< $(LDFLAGS_NO_PIE)
+no_pie: hello.c libc.a
+	gcc $(CFLAGS_NO_PIE) $@ $? $(LDFLAGS_NO_PIE)
 
-envp: envp.c
-	gcc $(CFLAGS_NO_PIE) $@ $< $(LDFLAGS_NO_PIE)
+envp: envp.c libc.a
+	gcc $(CFLAGS_NO_PIE) $@ $? $(LDFLAGS_NO_PIE)
 
-pie: hello.c
-	gcc $(CFLAGS) $@ $< $(LDFLAGS)
+pie: hello.c libc.a
+	gcc $(CFLAGS) $@ $? $(LDFLAGS)
 
 clean:
 	-rm -f *.o pie no_pie nolibc_no_rwx_text nolibc_no_rwx_rodata nolibc envp
