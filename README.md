@@ -30,7 +30,23 @@ You can use the `Makefile` to compile all test files.
 
 The assignment is split into **4 graded parts**, totaling **90 points** (10 points are given by the linter):
 
-### 1. Minimal loader for syscall-only binaries (**10 points**)
+### 1. ELF header validation (**10 points**)
+
+**Goal:** Before loading the ELF file, check if it is a valid, 64-bit ELF.
+You must check for 2 cases:
+
+* Check the [ELF magic](https://unix.stackexchange.com/questions/153352/what-is-elf-magic), defined [here](https://chromium.googlesource.com/external/elfutils/+/dts-0.168/libelf/elf.h#120).
+* Check the [ELF class](https://chromium.googlesource.com/external/elfutils/+/dts-0.168/libelf/elf.h#123), it should be `ELFCLASS64`.
+
+In case any of the items above are wrong, print one of the following messages and exit with the corresponding error code:
+
+`Wrong ELF magic!`, exit with code 3.
+
+or
+
+`Not a 64-bit ELF`, exit with code 4.
+
+### 2. Minimal loader for syscall-only binaries (**10 points**)
 
 **Goal:** Make the loader work with extremely minimal ELF binaries (usually written in assembly) that make direct syscalls and do not use libc.
 
@@ -48,8 +64,9 @@ For this task, you will need to:
 **Examples/Resources:**
 
 * [ELF Specification](https://refspecs.linuxbase.org/elf/gabi4+/ch5.pheader.html)
+* [OSDev](https://wiki.osdev.org/ELF)
 
-### 2. Load memory regions with correct permissions (**20 points**)
+### 3. Load memory regions with correct permissions (**10 points**)
 
 **Goal:** Instead of RWX, check the memory protection flags (`PF_R`, `PF_W`, `PF_X`) from the ELF `Program Headers`.
 
@@ -61,7 +78,7 @@ For this task, you will need to:
 * These must be respected to mimic the kernel loader.
 * [ELF Specification](https://refspecs.linuxbase.org/elf/gabi4+/ch5.pheader.html)
 
-### 3. Support static non-PIE binaries with libc (**30 points**)
+### 4. Support static non-PIE binaries with libc (**30 points**)
 
 **Goal:** Load and run statically linked **non-PIE** C binaries compiled with libc (e.g., via `gcc -static`).
 
@@ -124,7 +141,7 @@ __Note:__ Beware of the `AT_RANDOM` entry, the application will crash if you do 
 * [How programs get run: ELF binaries](https://lwn.net/Articles/631631/) (See section: `Populating the stack`)
 * [auxv man page](https://man7.org/linux/man-pages/man3/getauxval.3.html)
 
-### 4. Support static PIE executables (**30 points**)
+### 5. Support static PIE executables (**30 points**)
 
 **Goal:** Make your loader support static **PIE (Position Independent Executable)** binaries.
 

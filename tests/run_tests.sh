@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 tests=(
+"error-bad-magic|5"
+"error-not-64|5"
 "nolibc|20"
 "nolibc_no_rwx_rodata|10"
 "nolibc_no_rwx_text|10"
@@ -44,6 +46,14 @@ ret_expected()
 
 	if [[ "$testname" =~ "no_rwx" ]]; then
 		return 139
+	fi
+
+	if [[ "$testname" =~ "error-bad-magic" ]]; then
+		return 3
+	fi
+
+	if [[ "$testname" =~ "error-not-64" ]]; then
+		return 4
 	fi
 
 	return 0
