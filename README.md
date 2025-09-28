@@ -40,7 +40,7 @@ You must check for 2 cases:
 
 In case any of the items above are wrong, print one of the following messages and exit with the corresponding error code:
 
-`Wrong ELF magic!`, exit with code 3.
+`Not a valid ELF file`, exit with code 3.
 
 or
 
