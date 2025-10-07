@@ -64,6 +64,10 @@ ret_expected()
 
 run_tests()
 {
+	if test ! -d "$out"; then
+		mkdir "$out"
+	fi
+
 	for tst in "${tests[@]}"; do
 		test_name="$(echo "$tst" | cut -d'|' -f1)"
 		test_points="$(echo "$tst" | cut -d'|' -f2)"
