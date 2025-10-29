@@ -58,7 +58,7 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	 *	- Set memory permissions according to program header p_flags (PF_R, PF_W, PF_X).
 	 *	- Use mprotect() or map with the correct permissions directly using mmap().
 	 */
-	
+
 	/**
 	 * TODO: Support Static Non-PIE Binaries with libc
 	 * Must set up a valid process stack, including:
