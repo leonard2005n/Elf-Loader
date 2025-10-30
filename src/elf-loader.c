@@ -2,6 +2,7 @@
 
 #define _GNU_SOURCE
 
+#include <elf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -44,6 +45,19 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	 * Validate ELF magic bytes - "Not a valid ELF file" + exit code 3 if invalid.
 	 * Validate ELF class is 64-bit (ELFCLASS64) - "Not a 64-bit ELF" + exit code 4 if invalid.
 	 */
+	uint16_t elf_magic_word = *(uint16_t *)elf_contents;
+
+	if (elf_magic_word != *(uint16_t *)ELFMAG) {
+		perror("Not a valid ELF file");
+		exit(3);	
+	}
+
+	uint8_t elf_class_byte = *(uint8_t *)elf_contents + 2;
+
+	if (elf_class_byte != ELFCLASS64) {
+		perror("Not a 64-bit ELF");
+		exit(4);
+	}
 
 	/**
 	 * TODO: Load PT_LOAD segments
