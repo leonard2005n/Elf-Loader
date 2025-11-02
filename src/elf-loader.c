@@ -2,6 +2,7 @@
 
 #define _GNU_SOURCE
 
+#include <limits.h>
 #include <string.h>
 #include <elf.h>
 #include <stdio.h>
@@ -10,6 +11,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <sys/auxv.h>
 
 void *map_elf(const char *filename)
 {
@@ -88,10 +90,13 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	// Getting the first program hadder
 	Elf64_Phdr *start = (Elf64_Phdr *)(ptr_file + elf_header->e_phoff);
 	int off_bytes = 0;
+	long lowest_address = LONG_MAX;
+	long lowest_offset;
 
 	// This is interrating thru the program hadders
 	for (int i = 0; i < elf_header->e_phnum; i++) {
 		Elf64_Phdr *ptr = (void *)start + off_bytes;
+
 
 		if (ptr->p_type == PT_LOAD) {
 			unsigned long map_address = ptr->p_vaddr & ~(page_size - 1);
@@ -115,7 +120,12 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	for (int i = 0; i < elf_header->e_phnum; i++) {
 		Elf64_Phdr *ptr = (void *)start + off_bytes;
 		// printf("%d\n", ptr->p_type);
-		if (ptr->p_type == PT_LOAD) {\
+		if (ptr->p_type == PT_LOAD) {
+			if (lowest_address > ptr->p_vaddr) {
+				lowest_address = ptr->p_vaddr;
+				lowest_offset = ptr->p_offset;
+			}
+
 			unsigned long map_address = ptr->p_vaddr & ~(page_size - 1);
 			unsigned long offset = ptr->p_vaddr - map_address;
 
@@ -133,72 +143,127 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	 */
 
 	void *sp = NULL;
-	sp = mmap(NULL, page_size, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	sp = mmap(NULL, page_size * 4, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 	sp = sp + page_size;
 
+
+	// Copying the argv element to the stack frame
+	void *elements = sp + page_size * 3;
+	char **new_argv = sp + page_size * 2;
+	for (int i = 0; i < argc; i++) {
+		elements -= strlen(argv[i]) + 1;
+		memcpy(elements, argv[i], strlen(argv[i]) + 1);
+		new_argv[i] = elements;
+	}
+
+	// Copying the envp to the stack frame
+	char **new_envp = sp + page_size;
+	int i = 0;
+	while(envp[i]) {
+		elements -= strlen(envp[i]) + 1;
+		memcpy(elements, envp[i], strlen(envp[i]) + 1);
+		new_envp[i] = elements;
+		i++;
+	}
+
+	// Where the stack will be
+	void *start_sp = sp;
+
+	// where the argc will be
+	long number = argc;
+	memcpy(sp, &number, sizeof(long));
+	sp += sizeof(long);
 	
-	// // Puting the envp into position on the stack
-	// int i = 0;
-	// char *real_sp = sp;
-	// while (envp[i]) {
-	// 	char *aux = (char *)sp + i * sizeof(char *);
-	// 	memcpy(aux, envp[i], sizeof(char *));
-	// 	real_sp = aux;
-	// 	i++;
-	// }
+	// Argv arguments
+	for (int i = 0; i < argc; i++) {
+		memcpy(sp, &new_argv[i], sizeof(void *));
+		sp += sizeof(void *);
+	}
+
+	// Zero section
+	char *aux = sp;
+	for (int i = 0; i < sizeof(void *); i++) {
+		aux[i] = 0;
+	}
+	sp += sizeof(void *);
+
+	// evnp arguments
+	i = 0;
+	while (envp[i]) {
+		memcpy(sp, &new_envp[i], sizeof(void *));
+		sp += sizeof(void *);
+		i++;
+	}
+
+	// Zero section
+	aux = sp;
+	for (int i = 0; i < sizeof(void *); i++) {
+		aux[i] = 0;
+	}
+	sp += sizeof(void *);
+
+	// AT_PHDR
+	long res = lowest_address + (elf_header->e_phoff - lowest_offset);
+	number = AT_PHDR;
+
+	memcpy(sp, &number, sizeof(long));
+	sp += sizeof(long);
+
+	memcpy(sp, &res, sizeof(long));
+	sp += sizeof(long);
+
+	// AT_PHRNT
+	res = (long) elf_header->e_phentsize;
+	number = AT_PHENT;
+
+	memcpy(sp, &number, sizeof(long));
+	sp += sizeof(long);
+
+	memcpy(sp, &res, sizeof(long));
+	sp += sizeof(long);
 	
-	// sp -= sizeof(void *);
-	// for (int i = 0 ; i < sizeof(void*); i++) {
-	// 	char *aux = (char *)sp;
-	// 	aux[i] = 0;
-	// }
+	// AT_PHNUM
+	res = (long) elf_header->e_phnum;
+	number = AT_PHNUM;
 
-	// // Puting the arguments into position on the stack
-	// sp -= sizeof(void *) * argc;
+	memcpy(sp, &number, sizeof(long));
+	sp += sizeof(long);
 
-	// void *aux = sp;
-	// for (int i = 0; i < argc; i++) {
-	// 	memcpy(aux, *(argv + i * sizeof(char *)), sizeof(void *));
-	// 	aux += sizeof(void *);
-	// }
+	memcpy(sp, &res, sizeof(long));
+	sp += sizeof(long);
 
-	// sp -= sizeof(int);
-	// memcpy(sp, &argc, sizeof(int));
+	// AT_PAGESZ
+	res = page_size;
+	number = AT_PAGESZ;
 
-	// sp = real_sp;
+	memcpy(sp, &number, sizeof(long));
+	sp += sizeof(long);
 
-	// char **new_argv;
-	// for (int i = 0; i < argc; i++) {
-		
-	// }
+	memcpy(sp, &res, sizeof(long));
+	sp += sizeof(long);
 
-	// void *start_sp = sp;
-	// char *aux = sp;
+	// At random
+	elements -= 20;
+	res = (long)elements;
+	number = AT_RANDOM;
 
-	// for (int i = 0; i < sizeof(void *); i++) {
-	// 	aux[i] = 0;
-	// }
+	memcpy(sp, &number, sizeof(long));
+	sp += sizeof(long);
 
-	// memcpy(sp, &argc, sizeof(int));
-	// sp += sizeof(void *);
+	memcpy(sp, &res, sizeof(long));
+	sp += sizeof(long);
 
-	// for (int i = 0; i < argc; i++) {
-	// 	memcpy(sp, *argv[i], sizeof(void *));
-	// 	sp += sizeof(void *);
-	// }
+	// AT_NULL
+	res = 0;
+	number = AT_NULL;
 
-	// for (int i = 0; i < sizeof(void *); i++) {
-	// 	aux[i] = 0;
-	// }
-	// sp += sizeof(void *);
+	memcpy(sp, &number, sizeof(long));
+	sp += sizeof(long);
 
-	// int i = 0;
-	// while (envp[i]) {
-	// 	memcpy(sp, envp[i], sizeof(void *));
-	// 	sp += sizeof(void *);
-	// }
+	memcpy(sp, &res, sizeof(long));
+	sp += sizeof(long);
 
-	// sp = start_sp;
+	sp = start_sp;
 
 	/**
 	 * TODO: Support Static PIE Executables
