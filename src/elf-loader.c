@@ -13,6 +13,42 @@
 #include <fcntl.h>
 #include <sys/auxv.h>
 
+// Function that retuns the alligned memory block and his offest
+void *allign_memory(unsigned long vaddr, unsigned long allignment, unsigned long *offset)
+{
+		void *map_address = (void *)(vaddr & ~(allignment - 1));
+		*offset = vaddr - (unsigned long) map_address;
+		return map_address;
+}
+
+// Function that puts auxv argument on the stack
+void put_auxv(unsigned long *stack, unsigned long flag, unsigned long value)
+{
+
+	unsigned long aux = *stack;
+
+	aux -= (sizeof(unsigned long));
+	memcpy((void *)aux, &value, sizeof(unsigned long));
+
+	aux -= (sizeof(unsigned long));
+	memcpy((void *)aux, &flag, sizeof(unsigned long));
+
+	*stack = aux;
+}
+
+// Function that adds a null field
+void null_field(unsigned long *stack)
+{
+
+	unsigned long aux = *stack;
+
+	aux -= (sizeof(unsigned long));
+	memset((void *)stack, 0, sizeof(unsigned long));
+
+	*stack = aux;
+
+}
+
 void *map_elf(const char *filename)
 {
 	// This part helps you store the content of the ELF file inside the buffer.
@@ -54,7 +90,7 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 
 	if (elf_magic_word != *(uint16_t *)ELFMAG) {
 		perror("Not a valid ELF file");
-		exit(3);	
+		exit(3);
 	}
 
 	// Verifing if the ELF file is for 64 bits system
@@ -74,8 +110,8 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 
 	// Getting the page size of the system
 	long page_size = sysconf(_SC_PAGESIZE);
-	
-	// Getting the the elf heder file
+
+	// Getting the elf heder file
 	Elf64_Ehdr *elf_header = (Elf64_Ehdr *)elf_contents;
 	struct stat statbuf;
 
@@ -85,11 +121,15 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 
 	// Mapping the file in the memory
 	void *ptr_file = mmap(NULL, statbuf.st_size, PROT_READ, MAP_SHARED, file, 0);
+
+	// Closeing the file because we don't need it anymore
 	close(file);
 
 	// Getting the first program hadder
 	Elf64_Phdr *start = (Elf64_Phdr *)(ptr_file + elf_header->e_phoff);
 	int off_bytes = 0;
+	unsigned long offset;
+	void *map_address;
 
 	// This is interrating thru the program hadders
 	for (int i = 0; i < elf_header->e_phnum; i++) {
@@ -97,10 +137,10 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 
 
 		if (ptr->p_type == PT_LOAD) {
-			void * map_address = (void *)(ptr->p_vaddr & ~(page_size - 1));
-			unsigned long offset = ptr->p_vaddr - (unsigned long) map_address;
+			map_address = allign_memory(ptr->p_vaddr, page_size, &offset);
 
-			void *page = mmap(map_address, ptr->p_memsz + offset, PROT_EXEC | PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+			void *page = mmap(map_address, ptr->p_memsz + offset, PROT_EXEC | PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
 			memcpy(page + offset, ptr_file + ptr->p_offset, ptr->p_filesz);
 		}
 		off_bytes += elf_header->e_phentsize;
@@ -114,28 +154,24 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	 */
 
 	off_bytes = 0;
-	// Iterating to change the the permission of the segments
+	// Iterating to change the permission of the segments
 	for (int i = 0; i < elf_header->e_phnum; i++) {
 		Elf64_Phdr *ptr = (void *)start + off_bytes;
 
 		if (ptr->p_type == PT_LOAD) {
-			void * map_address = (void *)(ptr->p_vaddr & ~(page_size - 1));
-			unsigned long offset = ptr->p_vaddr - (unsigned long) map_address;
+			map_address = allign_memory(ptr->p_vaddr, page_size, &offset);
 
 			unsigned char prot = PROT_NONE;
 			unsigned char flags = ptr->p_flags;
-			
-			if (flags & PF_X) {
+
+			if (flags & PF_X)
 				prot |= PROT_EXEC;
-			}
 
-			if (flags & PF_W) {
+			if (flags & PF_W)
 				prot |= PROT_WRITE;
-			}
 
-			if (flags & PF_R) {
+			if (flags & PF_R)
 				prot |= PROT_READ;
-			}
 
 			mprotect(map_address, ptr->p_memsz + offset, prot);
 		}
@@ -151,209 +187,87 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	 */
 
 	void *sp = NULL;
-	
+
 	unsigned long stack;
 
-	sp = mmap(NULL, page_size * 4096, PROT_WRITE | PROT_READ, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-	
-	// stack = (unsigned long)sp + page_size * 4096;
+	sp = mmap(NULL, page_size * 4096, PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-	// stack -= 20;
-	// unsigned long vector_random = stack;
+	stack = (unsigned long)sp + page_size * 4096;
 
-	// // Puting the argv on the stack
-	// unsigned char *new_argv[20000];
-	// for (int i = 0; i < argc; i++) {
-	// 	stack -= strlen(argv[i]) + 1;
-	// 	memcpy((void *)stack, argv[i], strlen(argv[i]) + 1);
-	// 	new_argv[i] = (char *)stack;
-	// }
+	stack -= 16;
+	unsigned long vector_random = stack;
 
+	// Puting the argv on the stack
+	unsigned long new_argv[20000];
 
-	// // Puting the envp on the stack
-	// int i = 0;
-	// unsigned char *new_envp[20000];
-	// while (envp[i]) {
-	// 	stack -= strlen(envp[i]) + 1;
-	// 	memcpy((void *)stack, envp[i], strlen(envp[i]) + 1);
-	// 	new_envp[i] = (char *)stack;
-	// 	i++;
-	// }
-
-	// unsigned long value;
-	// unsigned long *value_ptr = &value;
+	for (int i = 0; i < argc; i++) {
+		stack -= strlen(argv[i]) + 1;
+		memcpy((void *)stack, argv[i], strlen(argv[i]) + 1);
+		printf("%s %s\n", argv[i], (char *)stack);
+		new_argv[i] = stack;
+	}
 
 
-	// // Alliging the stack
-	// stack = (unsigned long)stack & ~(page_size - 1);
+	// Puting the envp on the stack
+	int i = 0;
+	unsigned long new_envp[20000];
 
-	// // Put null
-	// stack -= (sizeof(unsigned long));
-	// memset((void *)stack, 0, sizeof(unsigned long));
+	while (envp[i]) {
+		stack -= strlen(envp[i]) + 1;
+		memcpy((void *)stack, envp[i], strlen(envp[i]) + 1);
+		new_envp[i] = stack;
+		i++;
+	}
 
-	// stack -= (sizeof(unsigned long));
-	// value = AT_NULL;
-	// memcpy((void *)stack, value_ptr, sizeof(unsigned long));
 
-	// // Put Random
-	// stack -= (sizeof(unsigned long));
-	// memset((void *)stack, vector_random, sizeof(unsigned long));
+	unsigned long value;
+	unsigned long *value_ptr = &value;
 
-	// stack -= (sizeof(unsigned long));
-	// value = AT_RANDOM;
-	// memcpy((void *)stack, value_ptr, sizeof(unsigned long));
-	
-	// // Put entry
-	// stack -= (sizeof(unsigned long));
-	// memset((void *)stack, elf_header->e_entry, sizeof(unsigned long));
+	// Alliging the stack
+	stack = (unsigned long) allign_memory(stack, 16, &offset);
 
-	// stack -= (sizeof(unsigned long));
-	// value = AT_ENTRY;
-	// memcpy((void *)stack, value_ptr, sizeof(unsigned long));
+
+	// Put null
+	put_auxv(&stack, AT_NULL, 0);
+
+	// Put Random
+	put_auxv(&stack, AT_RANDOM, vector_random);
+
+	// Put entry
+	put_auxv(&stack, AT_ENTRY, elf_header->e_entry);
 
 	// // Put pages
-	// stack -= (sizeof(unsigned long));
-	// memset((void *)stack, (unsigned long)page_size, sizeof(unsigned long));
-
-	// stack -= (sizeof(unsigned long));
-	// value = AT_PAGESZ;
-	// memcpy((void *)stack, value_ptr, sizeof(unsigned long));
-
-	
-	// // Distance between auxv and envp
-	// stack -= (sizeof(unsigned long));
-	// memset((void *)stack, 0, sizeof(unsigned long));
-
-	// i = 0;
-	// while (envp[i]) {
-	// 	stack -= sizeof(unsigned char *);
-	// 	memcpy((void *)stack, new_envp[i], sizeof(unsigned char *));
-	// 	i++;
-	// }
-
-	// // Distance between envp and argv
-	// stack -= (sizeof(unsigned long));
-	// memset((void *)stack, 0, sizeof(unsigned long));
-
-	// for (int i = 0; i < argc; i++) {
-	// 	stack -= sizeof(unsigned char *);
-	// 	memcpy((void *)stack, new_argv[i], sizeof(unsigned char *));
-	// }
-
-	// stack -= (sizeof(unsigned long));
-	// value = argc;
-	// memcpy((void *)stack, value_ptr, sizeof(unsigned long));
+	put_auxv(&stack, AT_PAGESZ, page_size);
 
 
-	sp = (void *)start;
+	// Distance between auxv and envp
+	null_field(&stack);
 
-	// // Copying the argv element to the stack frame
-	// void *elements = sp + page_size * 3;
-	// char **new_argv = sp + page_size * 2;
-	// for (int i = 0; i < argc; i++) {
-	// 	elements -= strlen(argv[i]) + 1;
-	// 	memcpy(elements, argv[i], strlen(argv[i]) + 1);
-	// 	new_argv[i] = elements;
-	// }
+	i = 0;
+	while (envp[i]) {
+		stack -= sizeof(unsigned long *);
+		memcpy((void *)stack, &new_envp[i], sizeof(unsigned long *));
+		i++;
+	}
 
-	// // Copying the envp to the stack frame
-	// char **new_envp = sp + page_size;
-	// int i = 0;
-	// while(envp[i]) {
-	// 	elements -= strlen(envp[i]) + 1;
-	// 	memcpy(elements, envp[i], strlen(envp[i]) + 1);
-	// 	new_envp[i] = elements;
-	// 	i++;
-	// }
 
-	// // Where the stack will be
-	// void *start_sp = sp;
+	// Distance between envp and argv
+	null_field(&stack);
 
-	// // where the argc will be
-	// long number = argc;
-	// memcpy(sp, &number, sizeof(long));
-	// sp += sizeof(long);
-	
-	// // Argv arguments
-	// for (int i = 0; i < argc; i++) {
-	// 	memcpy(sp, &new_argv[i], sizeof(void *));
-	// 	sp += sizeof(void *);
-	// }
 
-	// // Zero section
-	// char *aux = sp;
-	// for (int i = 0; i < sizeof(void *); i++) {
-	// 	aux[i] = 0;
-	// }
-	// sp += sizeof(void *);
+	for (int i = argc - 1; i >= 0; i--) {
+		stack -= sizeof(unsigned char *);
+		memcpy((void *)stack, &new_argv[i], sizeof(unsigned long));
+	}
 
-	// // evnp arguments
-	// i = 0;
-	// while (envp[i]) {
-	// 	memcpy(sp, &new_envp[i], sizeof(void *));
-	// 	sp += sizeof(void *);
-	// 	i++;
-	// }
+	stack -= sizeof(unsigned long);
+	value = argc;
+	memcpy((void *)stack, value_ptr, sizeof(unsigned long));
 
-	// // Zero section
-	// aux = sp;
-	// for (int i = 0; i < sizeof(void *); i++) {
-	// 	aux[i] = 0;
-	// }
-	// sp += sizeof(void *);
 
-	// // AT_PHDR
-	// long res = lowest_address;
-	// number = AT_PHDR;
-	// memcpy(sp, &number, sizeof(long));
-	// sp += sizeof(long);
-	// memcpy(sp, &res, sizeof(long));
-	// sp += sizeof(long);
+	sp = (void *)stack;
 
-	// // AT_PHRNT
-	// res = (long) elf_header->e_phentsize;
-	// number = AT_PHENT;
-	// memcpy(sp, &number, sizeof(long));
-	// sp += sizeof(long);
-	// memcpy(sp, &res, sizeof(long));
-	// sp += sizeof(long);
-	
-	// // AT_PHNUM
-	// res = (long) elf_header->e_phnum;
-	// number = AT_PHNUM;
-	// memcpy(sp, &number, sizeof(long));
-	// sp += sizeof(long);
-	// memcpy(sp, &res, sizeof(long));
-	// sp += sizeof(long);
-
-	// // AT_PAGESZ
-	// res = page_size;
-	// number = AT_PAGESZ;
-	// memcpy(sp, &number, sizeof(long));
-	// sp += sizeof(long);
-	// memcpy(sp, &res, sizeof(long));
-	// sp += sizeof(long);
-
-	// // At random
-	// elements -= 20;
-	// res = (long)elements;
-	// number = AT_RANDOM;
-	// memcpy(sp, &number, sizeof(long));
-	// sp += sizeof(long);
-	// memcpy(sp, &res, sizeof(long));
-	// sp += sizeof(long);
-
-	// // AT_NULL
-	// res = 0;
-	// number = AT_NULL;
-	// memcpy(sp, &number, sizeof(long));
-	// sp += sizeof(long);
-	// memcpy(sp, &res, sizeof(long));
-	// sp += sizeof(long);
-
-	// sp = start_sp;
-
-	/**
+	/*
 	 * TODO: Support Static PIE Executables
 	 * Map PT_LOAD segments at a random load base.
 	 * Adjust virtual addresses of segments and entry point by load_base.
@@ -361,7 +275,7 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	 */
 
 	// TODO: Set the entry point and the stack pointer
-	
+
 	void (*entry)() = (void (*)) elf_header->e_entry;
 
 
