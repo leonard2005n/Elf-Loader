@@ -110,6 +110,7 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 
 	// Getting the page size of the system
 	long page_size = sysconf(_SC_PAGESIZE);
+	unsigned long load_base = 0;
 
 	// Getting the elf heder file
 	Elf64_Ehdr *elf_header = (Elf64_Ehdr *)elf_contents;
@@ -131,18 +132,25 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	unsigned long offset;
 	void *map_address;
 
+	// Getting the firs load_base address
+	if (elf_header->e_type == ET_DYN)
+		load_base = (unsigned long) mmap(NULL, page_size * 256, PROT_EXEC | PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
 	// This is interrating thru the program hadders
 	for (int i = 0; i < elf_header->e_phnum; i++) {
 		Elf64_Phdr *ptr = (void *)start + off_bytes;
 
-
+		// Loading the PT_LOAD segemnts into memory
 		if (ptr->p_type == PT_LOAD) {
-			map_address = allign_memory(ptr->p_vaddr, page_size, &offset);
+			map_address = allign_memory(ptr->p_vaddr + load_base, page_size, &offset);
 
-			void *page = mmap(map_address, ptr->p_memsz + offset, PROT_EXEC | PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+			void *page = mmap(map_address, ptr->p_memsz + offset, PROT_EXEC | PROT_WRITE | PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
 
 			memcpy(page + offset, ptr_file + ptr->p_offset, ptr->p_filesz);
 		}
+
+
+
 		off_bytes += elf_header->e_phentsize;
 	}
 
@@ -159,11 +167,12 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 		Elf64_Phdr *ptr = (void *)start + off_bytes;
 
 		if (ptr->p_type == PT_LOAD) {
-			map_address = allign_memory(ptr->p_vaddr, page_size, &offset);
+			map_address = allign_memory(ptr->p_vaddr + load_base, page_size, &offset);
 
 			unsigned char prot = PROT_NONE;
 			unsigned char flags = ptr->p_flags;
 
+			//Determine the flags that we need to put
 			if (flags & PF_X)
 				prot |= PROT_EXEC;
 
@@ -173,6 +182,7 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 			if (flags & PF_R)
 				prot |= PROT_READ;
 
+			// Adding the protection
 			mprotect(map_address, ptr->p_memsz + offset, prot);
 		}
 		off_bytes += elf_header->e_phentsize;
@@ -203,7 +213,6 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	for (int i = 0; i < argc; i++) {
 		stack -= strlen(argv[i]) + 1;
 		memcpy((void *)stack, argv[i], strlen(argv[i]) + 1);
-		printf("%s %s\n", argv[i], (char *)stack);
 		new_argv[i] = stack;
 	}
 
@@ -275,9 +284,8 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	 */
 
 	// TODO: Set the entry point and the stack pointer
-
-	void (*entry)() = (void (*)) elf_header->e_entry;
-
+	load_base += elf_header->e_entry;
+	void (*entry)() = (void (*)) load_base;
 
 	// Un mapping the file from memory
 	munmap(ptr_file, statbuf.st_size);
